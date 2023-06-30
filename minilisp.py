@@ -3,10 +3,10 @@ import code
 import argparse
 from functools import partial
 from types import FunctionType
-from typing import Iterator
+from typing import Iterator, Iterable
 
 Pair = tuple['LispObject']
-LispObject = str | Pair | None
+LispObject = str | int | Pair | None
 Scope = tuple[dict[str, LispObject]] | None
 
 current_procedure = None
@@ -15,6 +15,8 @@ class TailRecursion(BaseException): ...
 
 def eval_lisp(syntax: LispObject, scope: Scope, tail=False) -> LispObject:
     match syntax:
+        case int() as number:
+            return number
         case str() as name:
             while scope is not None:
                 top, scope = scope
@@ -99,6 +101,8 @@ def repr_lisp(datum: LispObject) -> str:
             return '<procedure>'
         case str():
             return datum
+        case int():
+            return str(datum)
         case None:
             return '()'
         case tuple():
@@ -110,6 +114,17 @@ def repr_lisp(datum: LispObject) -> str:
                 ls.extend(['.', repr_lisp(datum)])
             return '(' + ' '.join(ls) + ')'
         
+def iter_list(ls: Pair) -> Iterator[LispObject]:
+    while ls is not None:
+        car, ls = ls
+        yield car
+
+def product(it: Iterable):
+    ret = 1
+    for i in it:
+        ret *= i
+    return ret
+
 load = lambda filename: (scope := ({}, base_scope)) and list(map(
     partial(eval_lisp, scope=scope), 
     Reader().read_many(
@@ -125,11 +140,14 @@ base_scope = {
     'symbol?': lambda args: 't' if isinstance(args[0], str) else None,
     'load': lambda args: load(args[0]),
     'write': lambda args: print(repr_lisp(args[0])),
-    'read': lambda args: Reader().read(input())
+    'read': lambda args: Reader().read(input()),
+    '+': lambda args: sum(iter_list(args)),
+    '-': lambda args: -args[0] if args[1] is None else args[0] - sum(iter_list(args[1])),
+    '*': lambda args: product(iter_list(args))
 }, None
 
 def lexer(code: str) -> Iterator[str]:
-    scanner = re.compile(r'\(|\)|\'|\.|\s+|[^\(\)\'\.\s]+').scanner(code)
+    scanner = re.compile(r'\(|\)|\'|\.|\s+|\d+|[^\(\)\'\.\s\d]+').scanner(code)
     for m in iter(scanner.match, None):
         if not m.group(0).isspace():
             yield m.group(0)
@@ -178,6 +196,8 @@ class Reader:
         if self._accept('\''):
             return 'quote', (self.form(), None)
         self._advance()
+        if self.token.isnumeric():
+            return int(self.token)
         return self.token
 
 class LispRepl(code.InteractiveConsole):
@@ -202,7 +222,7 @@ class LispRepl(code.InteractiveConsole):
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('filename')
+    parser.add_argument('filename', nargs='?')
     args = parser.parse_args()
     if args.filename:
         load(args.filename)
