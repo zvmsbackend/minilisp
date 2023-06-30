@@ -1,6 +1,7 @@
 import re
 import code
 import argparse
+from functools import partial
 from types import FunctionType
 from typing import Iterator
 
@@ -109,12 +110,22 @@ def repr_lisp(datum: LispObject) -> str:
                 ls.extend(['.', repr_lisp(datum)])
             return '(' + ' '.join(ls) + ')'
         
+load = lambda filename: (scope := ({}, base_scope)) and list(map(
+    partial(eval_lisp, scope=scope), 
+    Reader().read_many(
+        open(filename, encoding='utf-8').read()
+    )
+)) or None
+
 base_scope = {
     'car': lambda args: args[0][0],
     'cdr': lambda args: args[0][1],
     'cons': lambda args: (args[0], args[1][0]),
     '=': lambda args: 't' if args[0] is args[1][0] is None or isinstance(args[0], str) and isinstance(args[1][0], str) and args[0] == args[1][0] else None,
-    'symbol?': lambda args: 't' if isinstance(args[0], str) else None
+    'symbol?': lambda args: 't' if isinstance(args[0], str) else None,
+    'load': lambda args: load(args[0]),
+    'write': lambda args: print(repr_lisp(args[0])),
+    'read': lambda args: Reader().read(input())
 }, None
 
 def lexer(code: str) -> Iterator[str]:
@@ -124,27 +135,34 @@ def lexer(code: str) -> Iterator[str]:
             yield m.group(0)
 
 class Reader:
-    def read(self, code: str) -> LispObject:
+    def __init__(self) -> None:
         self.token = None
         self.next = None
+
+    def read(self, code: str) -> LispObject:
         self.tokens = lexer(code)
         self._advance()
         return self.form()
     
+    def read_many(self, code: str) -> Iterator[LispObject]:
+        self.tokens = lexer(code)
+        self._advance()
+        return iter(self.form, None)
+    
     def _advance(self):
         self.token, self.next = self.next, next(self.tokens, None)
 
-    def _accept(self, token: str):
+    def _accept(self, token: str) -> bool:
         if self.next == token:
             self._advance()
             return True
         return False
     
-    def _expect(self, token: str):
+    def _expect(self, token: str) -> None:
         if not self._accept(token):
             raise SyntaxError(f'expected {token}')
         
-    def form(self):
+    def form(self) -> LispObject:
         if self._accept('('):
             acc = None
             while not self._accept(')'):
@@ -163,7 +181,7 @@ class Reader:
         return self.token
 
 class LispRepl(code.InteractiveConsole):
-    def __init__(self):
+    def __init__(self) -> None:
         self.scope = {}, base_scope
         self.resetbuffer()
         self.filename = '<stdin>'
@@ -187,6 +205,6 @@ if __name__ == '__main__':
     parser.add_argument('filename')
     args = parser.parse_args()
     if args.filename:
-        ...
+        load(args.filename)
     else:
         LispRepl().interact()
